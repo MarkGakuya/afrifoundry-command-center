@@ -58,18 +58,44 @@ export default function BridgePage() {
 
   const load = useCallback(async () => {
     try {
-      const [s, f] = await Promise.all([getBridgeStats(), getActivityFeed()]);
-      if (s && !s.error && s.total_users !== undefined) {
-        setStats(s);
+      const s = await getBridgeStats();
+      if (s && !s.error && s.users) {
+        // Map nested API response to flat stats object
+        const mapped = {
+          total_users: s.users?.total || 0,
+          total_datapoints: s.datapoints?.total || 0,
+          conversations_today: s.conversations?.today || 0,
+          active_users: s.users?.active_24h || 0,
+          messages_sent: s.conversations?.total || 0,
+          feedback_received: (s.feedback?.thumbs_up || 0) + (s.feedback?.thumbs_down || 0),
+          review_queue_count: 0,
+          api_status: 'healthy',
+          db_status: 'healthy',
+          ai_status: s.errors_24h > 5 ? 'warning' : 'healthy',
+          scout_status: 'healthy',
+          scraper_status: 'warning',
+          // extras
+          users_this_week: s.users?.new_this_week || 0,
+          retention_rate: s.users?.retention_rate || 0,
+          avg_turns: s.conversations?.avg_turns || 0,
+          deep_conversations: s.conversations?.deep_conversations || 0,
+          satisfaction_rate: s.feedback?.satisfaction_rate || 0,
+          errors_24h: s.errors_24h || 0,
+        };
+        setStats(mapped);
         setUsingMock(false);
+        // Activity feed from stats response
+        if (s.activity && s.activity.length > 0) {
+          const feed = s.activity.map(a => ({
+            type: a.type === 'new_user' ? 'user' : 'convo',
+            text: a.type === 'new_user' ? `New user joined: ${a.detail}` : `Conversation: ${a.detail}`,
+            time: a.when ? new Date(a.when).toLocaleTimeString('en-KE', { hour: '2-digit', minute: '2-digit' }) : '',
+          }));
+          setFeed(feed);
+        }
       } else {
         setStats(MOCK_STATS);
         setUsingMock(true);
-      }
-      if (f && !f.error && (Array.isArray(f) || Array.isArray(f.events))) {
-        setFeed(f.events || f);
-        setUsingMock(false);
-      } else {
         setFeed(MOCK_FEED);
       }
     } catch {
@@ -148,13 +174,9 @@ export default function BridgePage() {
 
       {/* Secondary Stats */}
       <div className="grid grid-cols-3 gap-3">
-        <StatCard label="Messages Sent" value={safeNum(s.messages_sent, 0).toLocaleString()} />
-        <StatCard label="Feedback Received" value={safeNum(s.feedback_received, 0).toLocaleString()} />
-        <StatCard
-          label="Review Queue"
-          value={safeNum(s.review_queue_count, 0).toLocaleString()}
-          sub={safeNum(s.review_queue_count, 0) > 0 ? 'Needs attention' : 'All clear'}
-        />
+        <StatCard label="Total Conversations" value={safeNum(s.messages_sent, 0).toLocaleString()} sub={`avg ${safeNum(s.avg_turns, 0)} turns`} />
+        <StatCard label="Feedback Received" value={safeNum(s.feedback_received, 0).toLocaleString()} sub={s.satisfaction_rate ? `${s.satisfaction_rate}% positive` : ''} />
+        <StatCard label="Errors (24h)" value={safeNum(s.errors_24h, 0).toLocaleString()} sub={safeNum(s.errors_24h, 0) > 0 ? 'Check logs' : 'All clear'} />
       </div>
 
       {/* Quick Actions */}
